@@ -1,0 +1,22 @@
+---
+database:
+  DSN: 'DBI:mysql:database=mail;host=localhost;port=3306'
+  username: mail_admin
+  password: changeme
+
+basedir:
+  postfix: /etc/postfix
+
+postfix:
+  aliases:
+    type: map        
+    filename: virtual_alias_maps
+    query: "SELECT source, destination FROM forwardings ORDER BY source;"
+  domains:
+    type: list
+    filename: virtual_mailbox_domains
+    query: "SELECT domain FROM domains ORDER BY domain;"
+  mailboxes:
+    type: map
+    filename: virtual_mailbox_maps
+    query: "SELECT email, CONCAT(SUBSTRING_INDEX(email,'@',-1),'/',SUBSTRING_INDEX(email,'@',1),'/') AS path FROM users ORDER BY email;"
