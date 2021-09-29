@@ -1,0 +1,183 @@
+#!/usr/bin/env perl
+#   Exit codes:
+#   0   Updated successfully
+#   1   No change to files
+#   2   Error condition
+
+use Modern::Perl '2017';    # Version 5.24
+use DBI;
+use File::Compare;
+use File::Copy;
+use File::Spec;
+use File::Temp qw(tempfile);
+use FindBin;
+use Getopt::Long;
+use IO::File;
+use List::Util qw(none);
+use Template;
+use YAML::XS qw(LoadFile);
+
+my $verbose = 0;
+my %opt     = (
+    config => '/etc/maildb2file.yml',    # Configuration file (YAML)
+    basedir => undef,        # Output base dir (overrides config file)
+    outfile => undef,        # Output file name (overrides config file)
+    format  => 'postfix',    # Output format type
+    verbose => \$verbose,    # Verbosity (incremental)
+    quiet => sub { $verbose = -1; }    # Quiet mode
+);
+GetOptions(
+    \%opt,        'config|c=s', 'basedir|b=s', 'outfile|o=s',
+    'format|f=s', 'verbose|v+', 'quiet|q'
+);
+
+my $cfg;
+eval {
+    $cfg = LoadFile( $opt{'config'} )
+      or die qq{Config: Unable to load config.\n};
+};
+_error($@) if ($@);                    # Error condition, so bail out
+
+# Sanity check our calling command
+my $cmd = shift @ARGV // '';
+my @commands = qw{ aliases domains mailboxes };
+_error(qq{No valid command supplied. Aborting.})
+  if ( none { $_ eq lc($cmd) } @commands );
+
+# Prepare all information needed for execution
+my $format    = $opt{'format'};
+my @params    = qw( query filename type);
+my %value_for = ();
+foreach my $param (@params)
+{
+    eval {
+        $value_for{$param} = $cfg->{$format}->{$cmd}->{$param}
+          or die qq{Config: No '$cmd' $param for '$format' output.};
+    };
+    _error($@) if ($@);    # Error condition, so bail out
+} ## end foreach my $param (@params)
+
+# Allow overriding of config file by the command line
+my $outdir  = $opt{basedir} // $cfg->{'basedir'}->{$format};
+my $outfile = $opt{outfile} // $value_for{'filename'};
+my $outpath = File::Spec->catfile( $outdir, $outfile );
+
+# Get data from our database
+my $dbh =
+  _db_connect( @{ $cfg->{'database'} }{qw(DSN username password)} );
+my $data = _db_get( $dbh, @value_for{qw(query type)} );
+
+#$dbh->disconnect;
+
+# Store the data in a temporary file
+my $tempfile = File::Temp->new()
+  or _error(qq{Unable to prepare temporary file.});
+my $template = File::Spec->catfile( $cmd . q{.tt2} );
+my $vars     = {
+    'format' => $format,
+    'output' => $value_for{'filename'},
+    'data'   => $data,
+};
+my $tt;
+
+eval {
+    $tt = Template->new(
+        {
+            INCLUDE_PATH =>
+              File::Spec->catdir( $FindBin::Bin, 'templates', $format )
+        }
+    ) or die q{Template: }, $Template::ERROR, qq{\n};
+
+    $tt->process( $template, $vars, $tempfile->filename )
+      or die qq{Template: Error in processing: }, $tt->error(), q{.};
+
+    # Flush to ensure all writes are done
+    $tempfile->flush();
+};
+_error($@) if ($@);    # Error condition, so bail out
+
+# Compare new vs. existing output
+if ( compare( $tempfile->filename, $outfile ) != 0 )
+{
+    # Files differ, move the new data into place
+    eval {
+        if ( -e $outfile )
+        {
+            copy( $outfile, $outfile . q{.old} )
+              or die qq{Copy: Unable to save old '$outfile' file.};
+        } ## end if ( -e $outfile )
+        copy( $tempfile, $outfile )
+          or die qq{Copy: Unable to copy new '$outfile' file.};
+    };
+    _error($@) if ($@);    # Error condition, so bail out
+
+    # All went well, time to exit
+    _cleanup(0);
+} ## end if ( compare( $tempfile...))
+else
+{
+    # Files are equal, ensure we exit with proper exit code
+    _cleanup(1);
+}
+
+sub _db_connect {
+    my ( $dsn, $user, $password ) = (@_);
+    my $dbh;
+    eval {
+        $dbh =
+          DBI->connect( $dsn, $user, $password, { RaiseError => 1 } )
+          or die qq{DB: Unable to connect to DSN '$dsn': $$DBI::errstr};
+    };
+    _error($@) if ($@);
+
+    return $dbh;
+} ## end sub _db_connect
+
+sub _db_get {
+    my ( $dbh, $query, $type, @args ) = (@_);
+    my $sth;
+    eval {
+        $sth = $dbh->prepare($query)
+          or die qq{DB: Prepare statement failed: $dbh->errstr()};
+        $sth->execute(@args)
+          or die qq{DB: Execution statement failed: $dbh->errstr()};
+    };
+    _error($@) if ($@);    # Error condition, so bail out
+
+    # Operation completed; do mild sanity checks
+    _error(qq{DB: No data returned for '$cmd' query. Aborting})
+      if ( $sth->rows() == 0 );
+
+    # Return either a hash or array ref, depending on query type
+    my $result;
+    my $mapping = {
+        map => sub {
+            my $sth = shift;
+
+            # reference to a hash
+            return $sth->fetchall_hashref(1);
+        },
+        list => sub {
+            my $sth = shift;
+
+            # reference to flat array
+            my @result = map { $_->[0] } @{ $sth->fetchall_arrayref };
+            return \@result;
+        },
+    };
+    eval { $result = $mapping->{$type}->($sth); };
+    _error($@) if ($@);    # Error condition, so bail out
+    return $result;
+} ## end sub _db_get
+
+sub _cleanup {
+    my $exitcode = shift @_ // 0;
+    File::Temp::cleanup();    # temporary files
+    exit $exitcode;
+}
+
+sub _error {
+    my $msg = shift;
+    print STDERR qq{$msg} unless ( $verbose < 0 );
+    _cleanup(2);
+}

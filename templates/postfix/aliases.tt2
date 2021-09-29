@@ -1,0 +1,5 @@
+# [% format %] - [% output %]
+# This is an auto-generated file by maildb2file.
+[% FOREACH key IN data.keys.sort %]
+[% key %]	[% data.$key.destination %]
+[%- END %]
