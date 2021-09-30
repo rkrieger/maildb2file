@@ -1,5 +1,5 @@
 # [% format %] - [% output %]
 # This is an auto-generated file by maildb2file.
 [% FOREACH domain IN data %]
-[% domain %]	dummy
+[% domain %]	[% domain %]
 [%- END %]
