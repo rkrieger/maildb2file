@@ -9,7 +9,7 @@ use DBI;
 use File::Compare;
 use File::Copy;
 use File::Spec;
-use File::Temp qw(tempfile);
+use File::Temp;
 use FindBin;
 use Getopt::Long;
 use IO::File;
@@ -19,12 +19,12 @@ use YAML::XS qw(LoadFile);
 
 my $verbose = 0;
 my %opt     = (
-    config => '/etc/maildb2file.yml',    # Configuration file (YAML)
+    config  => '/etc/maildb2file.yml',    # Configuration file (YAML)
     basedir => undef,        # Output base dir (overrides config file)
     outfile => undef,        # Output file name (overrides config file)
     format  => 'postfix',    # Output format type
     verbose => \$verbose,    # Verbosity (incremental)
-    quiet => sub { $verbose = -1; }    # Quiet mode
+    quiet   => sub { $verbose = -1; }    # Quiet mode
 );
 GetOptions(
     \%opt,        'config|c=s', 'basedir|b=s', 'outfile|o=s',
@@ -36,10 +36,10 @@ eval {
     $cfg = LoadFile( $opt{'config'} )
       or die qq{Config: Unable to load config.\n};
 };
-_error($@) if ($@);                    # Error condition, so bail out
+_error($@) if ($@);    # Error condition, so bail out
 
 # Sanity check our calling command
-my $cmd = shift @ARGV // '';
+my $cmd      = shift @ARGV // '';
 my @commands = qw{ aliases domains mailboxes };
 _error(qq{No valid command supplied. Aborting.})
   if ( none { $_ eq lc($cmd) } @commands );
@@ -60,7 +60,12 @@ foreach my $param (@params)
 # Allow overriding of config file by the command line
 my $outdir  = $opt{basedir} // $cfg->{'basedir'}->{$format};
 my $outfile = $opt{outfile} // $value_for{'filename'};
-my $outpath = File::Spec->catfile( $outdir, $outfile );
+
+# Ensure our output file has a complete path
+$outfile =
+  File::Spec->file_name_is_absolute($outfile)
+  ? $outfile
+  : File::Spec->catfile( $outdir, $outfile );
 
 # Get data from our database
 my $dbh =
@@ -105,7 +110,7 @@ if ( compare( $tempfile->filename, $outfile ) != 0 )
         {
             copy( $outfile, $outfile . q{.old} )
               or die qq{Copy: Unable to save old '$outfile' file.};
-        } ## end if ( -e $outfile )
+        }
         copy( $tempfile, $outfile )
           or die qq{Copy: Unable to copy new '$outfile' file.};
     };
