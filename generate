@@ -71,8 +71,7 @@ $outfile =
 my $dbh =
   _db_connect( @{ $cfg->{'database'} }{qw(DSN username password)} );
 my $data = _db_get( $dbh, @value_for{qw(query type)} );
-
-#$dbh->disconnect;
+$dbh->disconnect;
 
 # Store the data in a temporary file
 my $tempfile = File::Temp->new()
