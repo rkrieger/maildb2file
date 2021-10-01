@@ -8,11 +8,11 @@ set -e
 
 # Execute 'generate', saving highest exitcode value
 ${generate} aliases && postmap hash:/etc/postfix/virtual_alias_maps
-if [ $? -gt ${exitcode} ]; then $exitcode=$?; fi
+if [ $? -gt ${exitcode} ]; then exitcode=$?; fi
 ${generate} domains && postmap hash:/etc/postfix/virtual_mailbox_domains
-if [ $? -gt ${exitcode} ]; then $exitcode=$?; fi
+if [ $? -gt ${exitcode} ]; then exitcode=$?; fi
 ${generate} mailboxes && postmap hash:/etc/postfix/virtual_mailbox_maps
-if [ $? -gt ${exitcode} ]; then $exitcode=$?; fi
+if [ $? -gt ${exitcode} ]; then exitcode=$?; fi
 
 # Exit codes for 'generate':
 #   0   New data, copied in
